@@ -4,7 +4,7 @@
   "version": "3.0.0",
   "title": "FastyTranscript",
   "description": "Fast YouTube transcript fetcher. Copies to clipboard.",
-  "icon": "assets/extension_icon.png",
+  "icon": "extension_icon.png",
   "author": "apoorv_khandelwal",
   "contributors": [
     "pernielsentikaer",
@@ -21,7 +21,8 @@
       "name": "fetch-youtube-transcript",
       "title": "FastyTranscript",
       "description": "Fetch YouTube transcript from clipboard",
-      "mode": "view"
+      "mode": "view",
+      "icon": "extension_icon.png"
     }
   ],
   "preferences": [],
