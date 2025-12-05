@@ -1,11 +1,13 @@
-import { Innertube } from "youtubei.js";
+import { YoutubeTranscript } from "@danielxceron/youtube-transcript";
 
-// Function to extract video ID from URL
+// Extract video ID from various YouTube URL formats
 export function extractVideoId(url: string): string | null {
   const patterns = [
     /(?:https?:\/\/)?(?:www\.)?youtu\.be\/([a-zA-Z0-9_-]+)/,
     /(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/,
     /(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([a-zA-Z0-9_-]+)/,
+    /(?:https?:\/\/)?(?:www\.)?youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/,
+    /^([a-zA-Z0-9_-]{11})$/, // Just the video ID
   ];
 
   for (const pattern of patterns) {
@@ -17,52 +19,63 @@ export function extractVideoId(url: string): string | null {
   return null;
 }
 
-// Get YouTube transcript using youtubei.js (InnerTube)
-export async function getVideoTranscript(
-  videoId: string,
-): Promise<{ transcript: string; title: string }> {
+// Fetch video title using YouTube's oEmbed API (fast, no API key needed)
+async function fetchVideoTitle(videoId: string): Promise<string> {
   try {
-    const youtube = await Innertube.create();
-    const info = await youtube.getInfo(videoId);
-    
-    const title = info.basic_info.title || `YouTube Video ${videoId}`;
-    
-    try {
-      const transcriptData = await info.getTranscript();
-      
-      if (!transcriptData?.transcript?.content?.body?.initial_segments) {
-        throw new Error("No transcript segments found");
-      }
-
-      const segments = transcriptData.transcript.content.body.initial_segments;
-      const transcript = segments
-        .map((seg: any) => seg.snippet.text)
-        .join(" ");
-
-      return { transcript, title };
-    } catch (transcriptError) {
-      // Check if it's a "no transcript" error
-      const msg = String(transcriptError);
-      if (msg.includes("is disabled") || msg.includes("not available")) {
-        throw new Error("No transcript available for this video");
-      }
-      throw transcriptError;
+    const response = await fetch(
+      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+    );
+    if (response.ok) {
+      const data = (await response.json()) as { title?: string };
+      return data.title || `YouTube Video ${videoId}`;
     }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    if (msg.includes("No transcript")) {
-      throw error;
-    }
-    throw new Error(`Failed to fetch transcript: ${msg}`);
+  } catch {
+    // Fallback to video ID if title fetch fails
   }
+  return `YouTube Video ${videoId}`;
+}
+
+// Get YouTube transcript using youtube-transcript package (FAST!)
+export async function getVideoTranscript(videoId: string): Promise<{ transcript: string; title: string }> {
+  // Fetch title and transcript in parallel for speed
+  const [title, transcriptData] = await Promise.all([
+    fetchVideoTitle(videoId),
+    YoutubeTranscript.fetchTranscript(videoId).catch((error: Error) => {
+      const msg = error.message || String(error);
+      if (
+        msg.includes("disabled") ||
+        msg.includes("not available") ||
+        msg.includes("Transcript is disabled") ||
+        msg.includes("No transcript")
+      ) {
+        throw new Error("No transcript available for this video. The video may have captions disabled.");
+      }
+      throw new Error(`Failed to fetch transcript: ${msg}`);
+    }),
+  ]);
+
+  if (!transcriptData || transcriptData.length === 0) {
+    throw new Error("No transcript available for this video. The video may not have captions.");
+  }
+
+  // Combine all transcript segments into plain text
+  // Clean up HTML entities and extra whitespace
+  const transcript = transcriptData
+    .map((segment) => segment.text)
+    .join(" ")
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return { transcript, title };
 }
 
 // Format transcript as Markdown
-export function formatTranscriptAsMarkdown(
-  transcript: string,
-  videoId: string,
-  title: string,
-): string {
+export function formatTranscriptAsMarkdown(transcript: string, videoId: string, title: string): string {
   return `# ${title}
 
 **URL:** https://youtube.com/watch?v=${videoId}

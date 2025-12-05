@@ -3,8 +3,8 @@
   "name": "fetch-youtube-transcript",
   "version": "3.0.0",
   "title": "FastyTranscript",
-  "description": "Lightning-fast YouTube transcript fetcher with auto-detection, Markdown output, and timestamp support",
-  "icon": "extension_icon.png",
+  "description": "Fast YouTube transcript fetcher. Copies to clipboard.",
+  "icon": "assets/extension_icon.png",
   "author": "apoorv_khandelwal",
   "contributors": [
     "pernielsentikaer",
@@ -20,15 +20,14 @@
     {
       "name": "fetch-youtube-transcript",
       "title": "FastyTranscript",
-      "description": "Instantly fetch YouTube transcript from clipboard/browser",
+      "description": "Fetch YouTube transcript from clipboard",
       "mode": "view"
     }
   ],
   "preferences": [],
   "dependencies": {
-    "@raycast/api": "^1.59.0",
-    "@raycast/utils": "^2.2.0",
-    "youtubei.js": "^16.0.1"
+    "@danielxceron/youtube-transcript": "^1.2.3",
+    "@raycast/api": "^1.59.0"
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.0.4",

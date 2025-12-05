@@ -1,10 +1,6 @@
 import { Detail, Clipboard, showToast, Toast } from "@raycast/api";
 import { useEffect, useState } from "react";
-import {
-  extractVideoId,
-  getVideoTranscript,
-  formatTranscriptAsMarkdown,
-} from "./utils";
+import { extractVideoId, getVideoTranscript, formatTranscriptAsMarkdown } from "./utils";
 
 export default function Command() {
   const [markdown, setMarkdown] = useState<string>("");
@@ -43,11 +39,11 @@ export default function Command() {
           result = await getVideoTranscript(videoId);
         } catch (fetchError) {
           const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
-          setMarkdown(`# ❌ Error\n\n${msg}`);
+          setMarkdown(`# ❌ Error\n\n${msg}\n\n**Video ID:** ${videoId}\n**URL:** https://youtube.com/watch?v=${videoId}`);
           setIsLoading(false);
           return;
         }
-        
+
         const { transcript, title } = result;
 
         // Format as Markdown
@@ -73,10 +69,5 @@ export default function Command() {
     fetchTranscript();
   }, []);
 
-  return (
-    <Detail
-      isLoading={isLoading}
-      markdown={isLoading ? "" : markdown}
-    />
-  );
+  return <Detail isLoading={isLoading} markdown={isLoading ? "" : markdown} />;
 }
