@@ -1,14 +1,15 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "fetch-youtube-transcript",
-  "version": "2.0.1",
-  "title": "Fetch YouTube Transcript",
-  "description": "Fetches and saves the transcript of a YouTube video in your downloads folder",
+  "version": "3.0.0",
+  "title": "FastyTranscript",
+  "description": "Lightning-fast YouTube transcript fetcher with auto-detection, Markdown output, and timestamp support",
   "icon": "extension_icon.png",
   "author": "apoorv_khandelwal",
   "contributors": [
     "pernielsentikaer",
-    "ridemountainpig"
+    "ridemountainpig",
+    "diegoships101"
   ],
   "categories": [
     "Media",
@@ -18,146 +19,18 @@
   "commands": [
     {
       "name": "fetch-youtube-transcript",
-      "title": "Fetch YouTube Transcript",
-      "description": "Fetches and saves the transcript of a YouTube video",
-      "mode": "no-view",
-      "arguments": [
-        {
-          "name": "videoUrl",
-          "type": "text",
-          "required": true,
-          "placeholder": "Enter YouTube video URL"
-        },
-        {
-          "name": "action",
-          "type": "dropdown",
-          "required": false,
-          "placeholder": "Default Action",
-          "default": "save",
-          "data": [
-            {
-              "title": "Save to txt file",
-              "value": "save"
-            },
-            {
-              "title": "Copy to clipboard",
-              "value": "copy"
-            }
-          ]
-        }
-      ]
+      "title": "FastyTranscript",
+      "description": "Instantly fetch YouTube transcript from clipboard/browser",
+      "mode": "view"
     }
   ],
-  "preferences": [
-    {
-      "name": "defaultDownloadFolder",
-      "type": "directory",
-      "required": false,
-      "title": "Default Download Folder",
-      "description": "Choose the default folder to save transcripts (if not set, will use Downloads folder)",
-      "placeholder": "~/Downloads"
-    },
-    {
-      "name": "defaultLanguage",
-      "type": "dropdown",
-      "required": true,
-      "title": "Default Language",
-      "description": "Choose the preferred language for transcripts",
-      "data": [
-        {
-          "title": "English",
-          "value": "en"
-        },
-        {
-          "title": "Arabic",
-          "value": "ar"
-        },
-        {
-          "title": "Bengali",
-          "value": "bn"
-        },
-        {
-          "title": "Chinese",
-          "value": "zh"
-        },
-        {
-          "title": "French",
-          "value": "fr"
-        },
-        {
-          "title": "German",
-          "value": "de"
-        },
-        {
-          "title": "Hindi",
-          "value": "hi"
-        },
-        {
-          "title": "Italian",
-          "value": "it"
-        },
-        {
-          "title": "Japanese",
-          "value": "ja"
-        },
-        {
-          "title": "Korean",
-          "value": "ko"
-        },
-        {
-          "title": "Marathi",
-          "value": "mr"
-        },
-        {
-          "title": "Portuguese",
-          "value": "pt"
-        },
-        {
-          "title": "Russian",
-          "value": "ru"
-        },
-        {
-          "title": "Spanish",
-          "value": "es"
-        },
-        {
-          "title": "Tamil",
-          "value": "ta"
-        },
-        {
-          "title": "Urdu",
-          "value": "ur"
-        }
-      ],
-      "default": "en"
-    },
-    {
-      "name": "defaultAction",
-      "description": "The default action used in argument",
-      "type": "dropdown",
-      "required": false,
-      "title": "Default Action",
-      "default": "save",
-      "placeholder": "The default action used in the command",
-      "data": [
-        {
-          "title": "Save to txt file",
-          "value": "save"
-        },
-        {
-          "title": "Copy to clipboard",
-          "value": "copy"
-        }
-      ]
-    }
-  ],
+  "preferences": [],
   "dependencies": {
     "@raycast/api": "^1.59.0",
     "@raycast/utils": "^2.2.0",
-    "which": "^5.0.0"
+    "youtubei.js": "^16.0.1"
   },
   "devDependencies": {
-    "@types/which": "^3.0.4",
     "@raycast/eslint-config": "^2.0.4",
     "@types/node": "22.13.10",
     "@types/react": "19.0.10",

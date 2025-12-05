@@ -1,71 +1,82 @@
-import { showToast, Toast, getPreferenceValues, open, Clipboard } from "@raycast/api";
-import { showFailureToast } from "@raycast/utils";
-import { promises as fs } from "fs";
-import path from "path";
-import os from "os";
-import { extractVideoId, sanitizeFilename, getVideoTranscript } from "./utils";
+import { Detail, Clipboard, showToast, Toast } from "@raycast/api";
+import { useEffect, useState } from "react";
+import {
+  extractVideoId,
+  getVideoTranscript,
+  formatTranscriptAsMarkdown,
+} from "./utils";
 
-export default async function Command(props: { arguments: Arguments.FetchYoutubeTranscript }) {
-  const { videoUrl, action } = props.arguments;
-  const { defaultAction, defaultDownloadFolder, defaultLanguage } = getPreferenceValues<ExtensionPreferences>();
+export default function Command() {
+  const [markdown, setMarkdown] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(true);
 
-  if (!videoUrl) {
-    await showFailureToast("YouTube URL is required");
-    return;
-  }
+  useEffect(() => {
+    async function fetchTranscript() {
+      try {
+        // Read from clipboard
+        let videoUrl: string | null = null;
+        try {
+          const clipboardText = await Clipboard.readText();
+          if (clipboardText && extractVideoId(clipboardText)) {
+            videoUrl = clipboardText;
+          }
+        } catch {
+          // Clipboard read failed
+        }
 
-  try {
-    // Extract video ID
-    const videoId = extractVideoId(videoUrl);
-    if (!videoId) {
-      throw new Error("Invalid YouTube URL. Please provide a valid URL.");
+        if (!videoUrl) {
+          setMarkdown("# ❌ No YouTube URL Found\n\nCopy a YouTube URL to your clipboard, then try again.");
+          setIsLoading(false);
+          return;
+        }
+
+        const videoId = extractVideoId(videoUrl);
+        if (!videoId) {
+          setMarkdown(`# ❌ Invalid URL\n\nNot a valid YouTube link.\n\n**URL:** ${videoUrl}`);
+          setIsLoading(false);
+          return;
+        }
+
+        // Fetch transcript
+        let result;
+        try {
+          result = await getVideoTranscript(videoId);
+        } catch (fetchError) {
+          const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+          setMarkdown(`# ❌ Error\n\n${msg}`);
+          setIsLoading(false);
+          return;
+        }
+        
+        const { transcript, title } = result;
+
+        // Format as Markdown
+        const markdownContent = formatTranscriptAsMarkdown(transcript, videoId, title);
+
+        // Copy to clipboard
+        await Clipboard.copy(markdownContent);
+
+        await showToast({
+          style: Toast.Style.Success,
+          title: "Copied to clipboard!",
+        });
+
+        setMarkdown(markdownContent);
+        setIsLoading(false);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        setMarkdown(`# ❌ Error\n\n${errorMessage}`);
+        setIsLoading(false);
+      }
     }
 
-    // Show loading toast
-    await showToast({
-      style: Toast.Style.Animated,
-      title: "Fetching transcript...",
-    });
+    fetchTranscript();
+  }, []);
 
-    // Get transcript with user's preferred language
-    const { transcript, title } = await getVideoTranscript(videoId, defaultLanguage || "en");
-
-    // Determine the actual action to perform
-    const actualAction = action || defaultAction || "save";
-
-    if (actualAction === "save") {
-      // Get download location
-      const downloadsFolder = defaultDownloadFolder || path.join(os.homedir(), "Downloads");
-
-      // Create filename and save
-      const sanitizedTitle = sanitizeFilename(title);
-      const filename = path.join(downloadsFolder, `${sanitizedTitle}_transcript.txt`);
-      await fs.writeFile(filename, transcript);
-
-      // Show success toast with actions
-      await showToast({
-        style: Toast.Style.Success,
-        title: "Transcript fetched and saved",
-        message: `Saved to: ${filename}`,
-        primaryAction: {
-          title: "Open File",
-          onAction: () => open(filename),
-        },
-        secondaryAction: {
-          title: "Open Folder",
-          onAction: () => open(downloadsFolder),
-        },
-      });
-    } else if (actualAction === "copy") {
-      await Clipboard.copy(transcript);
-      await showToast({
-        style: Toast.Style.Success,
-        title: "Transcript copied to clipboard",
-      });
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const title = errorMessage.includes("yt-dlp") ? "yt-dlp not found" : "Failed to fetch transcript";
-    await showFailureToast(error, { title });
-  }
+  return (
+    <Detail
+      isLoading={isLoading}
+      markdown={isLoading ? "" : markdown}
+    />
+  );
 }
