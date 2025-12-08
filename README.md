@@ -5,8 +5,7 @@ Raycast extension that fetches YouTube transcripts.
 I watch a lot of YouTube. Sometimes I want the transcript to feed into an LLM or skim content faster. This does that in 2 seconds.
 
 ## Demo
-
-[gif/screenshot here]
+https://x.com/diegooprime/status/1997911884528333044?s=20
 
 ## Usage
 
