@@ -50,21 +50,29 @@ function decodeHtmlEntities(text: string): string {
 }
 
 // Parse transcript XML - handles both srv1 (<text>) and srv3 (<p>/<s>) formats
-function parseTranscriptXml(xml: string): string[] {
+function parseTranscriptXml(xml: string): TranscriptSegment[] {
   // srv1 format: <text start="..." dur="...">content</text>
-  const srv1Re = /<text[^>]*>([^<]*)<\/text>/g;
-  const srv1Segments: string[] = [];
+  const srv1Re = /<text\s+start="([^"]*)"(?:\s+dur="([^"]*)")?[^>]*>([^<]*)<\/text>/g;
+  const srv1Segments: TranscriptSegment[] = [];
   let m: RegExpExecArray | null;
   while ((m = srv1Re.exec(xml)) !== null) {
-    if (m[1].trim()) srv1Segments.push(m[1]);
+    if (m[3].trim()) {
+      srv1Segments.push({
+        text: m[3],
+        start: parseFloat(m[1]) || 0,
+        duration: parseFloat(m[2]) || 0,
+      });
+    }
   }
   if (srv1Segments.length > 0) return srv1Segments;
 
   // srv3 format: <p t="..." d="..."><s>word</s>...</p>
-  const pRe = /<p[^>]*>([\s\S]*?)<\/p>/g;
-  const srv3Segments: string[] = [];
+  const pRe = /<p\s+t="([^"]*)"(?:\s+d="([^"]*)")?[^>]*>([\s\S]*?)<\/p>/g;
+  const srv3Segments: TranscriptSegment[] = [];
   while ((m = pRe.exec(xml)) !== null) {
-    const inner = m[1];
+    const startMs = parseInt(m[1]) || 0;
+    const durMs = parseInt(m[2]) || 0;
+    const inner = m[3];
     // Extract text from <s> tags within each <p>
     const words: string[] = [];
     const sRe = /<s[^>]*>([^<]*)<\/s>/g;
@@ -72,12 +80,19 @@ function parseTranscriptXml(xml: string): string[] {
     while ((s = sRe.exec(inner)) !== null) {
       if (s[1]) words.push(s[1]);
     }
+    let text: string;
     if (words.length > 0) {
-      srv3Segments.push(words.join(""));
+      text = words.join("");
     } else {
       // Fallback: strip all tags and use raw text
-      const stripped = inner.replace(/<[^>]+>/g, "").trim();
-      if (stripped) srv3Segments.push(stripped);
+      text = inner.replace(/<[^>]+>/g, "").trim();
+    }
+    if (text) {
+      srv3Segments.push({
+        text,
+        start: startMs / 1000,
+        duration: durMs / 1000,
+      });
     }
   }
   return srv3Segments;
@@ -95,6 +110,10 @@ function extractJsonObject(str: string, startIdx: number): string | null {
   return null;
 }
 
+export type TranscriptSegment = { text: string; start: number; duration: number };
+
+type TranscriptOptions = { timestamps?: boolean };
+
 type CaptionTrack = { baseUrl: string; languageCode: string };
 
 // Pick the best caption track (prefer English)
@@ -104,7 +123,7 @@ function pickTrackUrl(tracks: CaptionTrack[]): string {
 }
 
 // Fetch and parse a caption track URL
-async function fetchCaptionTrack(url: string, ua: string = WEB_UA): Promise<string[]> {
+async function fetchCaptionTrack(url: string, ua: string = WEB_UA): Promise<TranscriptSegment[]> {
   const response = await fetch(url, {
     headers: { "User-Agent": ua },
   });
@@ -117,7 +136,7 @@ async function fetchCaptionTrack(url: string, ua: string = WEB_UA): Promise<stri
 }
 
 // Strategy 1: InnerTube ANDROID client (most reliable - bypasses web restrictions)
-async function fetchTranscriptFromAndroid(videoId: string): Promise<string[]> {
+async function fetchTranscriptFromAndroid(videoId: string): Promise<TranscriptSegment[]> {
   const response = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
     method: "POST",
     headers: {
@@ -157,7 +176,7 @@ async function fetchTranscriptFromAndroid(videoId: string): Promise<string[]> {
 }
 
 // Strategy 2: Scrape YouTube page for ytInitialPlayerResponse
-async function fetchTranscriptFromPage(videoId: string): Promise<string[]> {
+async function fetchTranscriptFromPage(videoId: string): Promise<TranscriptSegment[]> {
   const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
     headers: { "User-Agent": WEB_UA, "Accept-Language": "en-US,en;q=0.9" },
   });
@@ -212,7 +231,7 @@ async function fetchTranscriptFromPage(videoId: string): Promise<string[]> {
 }
 
 // Strategy 3: yt-dlp fallback
-function fetchTranscriptFromYtDlp(videoId: string): string[] {
+function fetchTranscriptFromYtDlp(videoId: string): TranscriptSegment[] {
   // Get video metadata including subtitle URLs
   const result = execSync(
     `yt-dlp --skip-download --dump-json "https://www.youtube.com/watch?v=${videoId}" 2>/dev/null`,
@@ -264,10 +283,10 @@ function fetchTranscriptFromYtDlp(videoId: string): string[] {
   const segments = parseTranscriptXml(subResp);
   if (segments.length > 0) return segments;
 
-  // If VTT format, parse that
+  // If VTT format, parse that (no timing info available from plain VTT text lines)
   if (subResp.includes("WEBVTT")) {
     const lines = subResp.split("\n");
-    const textLines: string[] = [];
+    const textSegments: TranscriptSegment[] = [];
     for (const line of lines) {
       const trimmed = line.trim();
       if (
@@ -282,16 +301,33 @@ function fetchTranscriptFromYtDlp(videoId: string): string[] {
         continue;
       }
       const cleaned = trimmed.replace(/<[^>]+>/g, "").trim();
-      if (cleaned && !textLines.includes(cleaned)) textLines.push(cleaned);
+      if (cleaned && !textSegments.some((s) => s.text === cleaned)) {
+        textSegments.push({ text: cleaned, start: 0, duration: 0 });
+      }
     }
-    if (textLines.length > 0) return textLines;
+    if (textSegments.length > 0) return textSegments;
   }
 
   throw new Error("yt-dlp: could not parse subtitle content");
 }
 
+// Format seconds into MM:SS
+export function formatTimestamp(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+// Join segments with timestamps: "[MM:SS] text\n"
+export function joinSegmentsWithTimestamps(segments: TranscriptSegment[]): string {
+  return segments.map((s) => `[${formatTimestamp(s.start)}] ${decodeHtmlEntities(s.text).trim()}`).join("\n");
+}
+
 // Main: try all strategies in order
-export async function getVideoTranscript(videoId: string): Promise<{ transcript: string; title: string }> {
+export async function getVideoTranscript(
+  videoId: string,
+  options: TranscriptOptions = {},
+): Promise<{ transcript: string; title: string }> {
   const titlePromise = fetchVideoTitle(videoId);
   const errors: string[] = [];
 
@@ -299,7 +335,7 @@ export async function getVideoTranscript(videoId: string): Promise<{ transcript:
   try {
     const segments = await fetchTranscriptFromAndroid(videoId);
     const title = await titlePromise;
-    return { transcript: joinSegments(segments), title };
+    return { transcript: formatSegments(segments, options), title };
   } catch (e) {
     errors.push(`ANDROID API: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -308,7 +344,7 @@ export async function getVideoTranscript(videoId: string): Promise<{ transcript:
   try {
     const segments = await fetchTranscriptFromPage(videoId);
     const title = await titlePromise;
-    return { transcript: joinSegments(segments), title };
+    return { transcript: formatSegments(segments, options), title };
   } catch (e) {
     errors.push(`Page scraping: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -317,7 +353,7 @@ export async function getVideoTranscript(videoId: string): Promise<{ transcript:
   try {
     const segments = fetchTranscriptFromYtDlp(videoId);
     const title = await titlePromise;
-    return { transcript: joinSegments(segments), title };
+    return { transcript: formatSegments(segments, options), title };
   } catch (e) {
     errors.push(`yt-dlp: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -325,8 +361,15 @@ export async function getVideoTranscript(videoId: string): Promise<{ transcript:
   throw new Error(`No transcript available. All methods failed:\n${errors.map((e) => `- ${e}`).join("\n")}`);
 }
 
-function joinSegments(segments: string[]): string {
-  return decodeHtmlEntities(segments.join(" ")).trim();
+function formatSegments(segments: TranscriptSegment[], options: TranscriptOptions): string {
+  if (options.timestamps) {
+    return joinSegmentsWithTimestamps(segments);
+  }
+  return joinSegments(segments);
+}
+
+function joinSegments(segments: TranscriptSegment[]): string {
+  return decodeHtmlEntities(segments.map((s) => s.text).join(" ")).trim();
 }
 
 // Format transcript as Markdown

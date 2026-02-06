@@ -1,4 +1,4 @@
-import { Detail, Clipboard, showToast, Toast } from "@raycast/api";
+import { Detail, Clipboard, showToast, Toast, getPreferenceValues } from "@raycast/api";
 import { useEffect, useState } from "react";
 import { extractVideoId, getVideoTranscript, formatTranscriptAsMarkdown } from "./utils";
 
@@ -34,9 +34,10 @@ export default function Command() {
         }
 
         // Fetch transcript
+        const prefs = getPreferenceValues<{ includeTimestamps: boolean }>();
         let result;
         try {
-          result = await getVideoTranscript(videoId);
+          result = await getVideoTranscript(videoId, { timestamps: prefs.includeTimestamps });
         } catch (fetchError) {
           const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
           setMarkdown(

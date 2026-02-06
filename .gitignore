@@ -32,3 +32,16 @@ npm-debug.log*
 
 # yt-dlp artifacts
 *.vtt
+
+# One-off batch scripts
+batch-buildspace.mjs
+batch-buildspace-s5.mjs
+transcribe-s5-groq.py
+
+# Generated transcript output
+buildspace_transcripts/
+buildspace_s5_transcripts/
+
+# Temp/output directories
+/tmp_audio/
+/output/

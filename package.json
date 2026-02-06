@@ -25,7 +25,17 @@
       "icon": "extension_icon.png"
     }
   ],
-  "preferences": [],
+  "preferences": [
+    {
+      "name": "includeTimestamps",
+      "type": "checkbox",
+      "required": false,
+      "title": "Include Timestamps",
+      "description": "Add timestamps to transcript output",
+      "default": false,
+      "label": "Include Timestamps"
+    }
+  ],
   "dependencies": {
     "@raycast/api": "^1.59.0"
   },
@@ -42,7 +52,8 @@
     "dev": "ray develop",
     "fix-lint": "ray lint --fix",
     "lint": "ray lint",
-    "publish": "npx @raycast/api@latest publish"
+    "publish": "npx @raycast/api@latest publish",
+    "test": "node --test tests/*.test.mjs"
   },
   "overrides": {
     "cross-spawn": "^7.0.3",
