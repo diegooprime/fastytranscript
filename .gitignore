@@ -29,3 +29,6 @@ npm-debug.log*
 
 # TypeScript
 *.tsbuildinfo
+
+# yt-dlp artifacts
+*.vtt
