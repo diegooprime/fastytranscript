@@ -39,7 +39,9 @@ export default function Command() {
           result = await getVideoTranscript(videoId);
         } catch (fetchError) {
           const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
-          setMarkdown(`# ❌ Error\n\n${msg}\n\n**Video ID:** ${videoId}\n**URL:** https://youtube.com/watch?v=${videoId}`);
+          setMarkdown(
+            `# ❌ Error\n\n${msg}\n\n**Video ID:** ${videoId}\n**URL:** https://youtube.com/watch?v=${videoId}`,
+          );
           setIsLoading(false);
           return;
         }

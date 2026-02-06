@@ -27,7 +27,6 @@
   ],
   "preferences": [],
   "dependencies": {
-    "@danielxceron/youtube-transcript": "^1.2.3",
     "@raycast/api": "^1.59.0"
   },
   "devDependencies": {
