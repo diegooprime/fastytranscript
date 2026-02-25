@@ -43,8 +43,9 @@
     "@raycast/eslint-config": "^2.0.4",
     "@types/node": "22.13.10",
     "@types/react": "19.0.10",
+    "@typescript/native-preview": "^7.0.0-dev.20260218.1",
     "eslint": "^9.22.0",
-    "prettier": "^3.5.3",
+    "oxfmt": "^0.33.0",
     "typescript": "^5.8.2"
   },
   "scripts": {
@@ -53,7 +54,11 @@
     "fix-lint": "ray lint --fix",
     "lint": "ray lint",
     "publish": "npx @raycast/api@latest publish",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage tests/*.test.mjs",
+    "typecheck": "tsgo --noEmit",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check ."
   },
   "overrides": {
     "cross-spawn": "^7.0.3",

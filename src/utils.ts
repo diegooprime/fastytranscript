@@ -233,8 +233,10 @@ async function fetchTranscriptFromPage(videoId: string): Promise<TranscriptSegme
 // Strategy 3: yt-dlp fallback
 function fetchTranscriptFromYtDlp(videoId: string): TranscriptSegment[] {
   // Get video metadata including subtitle URLs
+  // SECURITY: videoId is validated by extractVideoId (alphanumeric + hyphen/underscore only)
+  // The -- prevents the URL from being interpreted as flags
   const result = execSync(
-    `yt-dlp --skip-download --dump-json "https://www.youtube.com/watch?v=${videoId}" 2>/dev/null`,
+    `yt-dlp --skip-download --dump-json -- "https://www.youtube.com/watch?v=${videoId}" 2>/dev/null`,
     { timeout: 45000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 },
   );
 
@@ -269,7 +271,8 @@ function fetchTranscriptFromYtDlp(videoId: string): TranscriptSegment[] {
 
   if (!track?.url) throw new Error("yt-dlp: no subtitle track URL");
 
-  const subResp = execSync(`curl -sL "${track.url}"`, {
+  // SECURITY: Use -- to prevent URL from being interpreted as flags
+  const subResp = execSync(`curl -sL -- "${track.url}"`, {
     timeout: 15000,
     encoding: "utf-8",
     maxBuffer: 10 * 1024 * 1024,
