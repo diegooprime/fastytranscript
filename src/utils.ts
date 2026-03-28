@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { existsSync, readFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -8,6 +8,16 @@ const WEB_UA =
 
 // Common paths where yt-dlp may be installed (Raycast doesn't inherit full shell PATH)
 const YT_DLP_PATHS = ["/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp", "/usr/bin/yt-dlp", "yt-dlp"];
+
+const FETCH_TIMEOUT = 15000;
+
+// Perf flags for yt-dlp: skip JS challenge solving and format checks (not needed for subtitle-only downloads)
+const YT_DLP_PERF_FLAGS = ["--no-warnings", "--no-check-formats", "--extractor-args", "youtube:player_skip=js"];
+
+async function fetchWithTimeout(url: string, opts: RequestInit & { timeout?: number } = {}): Promise<Response> {
+  const timeoutMs = opts.timeout || FETCH_TIMEOUT;
+  return fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs) });
+}
 
 // Extract video ID from various YouTube URL formats
 export function extractVideoId(url: string): string | null {
@@ -28,7 +38,7 @@ export function extractVideoId(url: string): string | null {
 // Fetch video title using YouTube's oEmbed API
 async function fetchVideoTitle(videoId: string): Promise<string> {
   try {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
     );
     if (response.ok) {
@@ -41,16 +51,16 @@ async function fetchVideoTitle(videoId: string): Promise<string> {
   return `YouTube Video ${videoId}`;
 }
 
-// Decode HTML entities
+// Decode HTML entities (&amp; decoded last to prevent double-decoding &amp;lt; → <)
 function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&nbsp;/g, " ")
     .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num)))
+    .replace(/&amp;/g, "&") // must be last
     .replace(/\s+/g, " ");
 }
 
@@ -144,7 +154,7 @@ type TranscriptOptions = { timestamps?: boolean };
 function findYtDlp(): string {
   for (const p of YT_DLP_PATHS) {
     try {
-      execSync(`"${p}" --version`, { timeout: 5000, stdio: "pipe" });
+      execFileSync(p, ["--version"], { timeout: 5000, stdio: "pipe" });
       return p;
     } catch {
       continue;
@@ -166,9 +176,6 @@ function cleanupSubFiles(prefix: string, videoId: string): void {
   }
 }
 
-// Perf flags: skip JS challenge solving and format checks (not needed for subtitle-only downloads)
-const YT_DLP_PERF_FLAGS = '--no-warnings --no-check-formats --extractor-args "youtube:player_skip=js"';
-
 // Strategy 1: yt-dlp direct subtitle download (most reliable)
 // Downloads subtitles directly instead of fetching timedtext URLs (which YouTube broke)
 function fetchTranscriptWithYtDlpDownload(videoId: string): TranscriptSegment[] {
@@ -180,20 +187,27 @@ function fetchTranscriptWithYtDlpDownload(videoId: string): TranscriptSegment[] 
 
   // SECURITY: videoId is validated by extractVideoId (alphanumeric + hyphen/underscore only)
   // Try manual subs first, then auto-generated
-  const subArgs = [
+  const subArgSets: string[][] = [
     // Attempt 1: manual subs in srv1 format
-    `--write-sub --sub-lang en --sub-format srv1`,
+    ["--write-sub", "--sub-lang", "en", "--sub-format", "srv1"],
     // Attempt 2: auto-generated subs in srv1 format
-    `--write-auto-sub --sub-lang en --sub-format srv1`,
+    ["--write-auto-sub", "--sub-lang", "en", "--sub-format", "srv1"],
     // Attempt 3: auto-generated subs in vtt format (broader compatibility)
-    `--write-auto-sub --sub-lang en --sub-format vtt`,
+    ["--write-auto-sub", "--sub-lang", "en", "--sub-format", "vtt"],
   ];
 
-  for (const args of subArgs) {
+  for (const subArgs of subArgSets) {
     try {
-      execSync(
-        `"${ytDlp}" ${args} ${YT_DLP_PERF_FLAGS} --skip-download -o "${prefix}%(id)s" -- "https://www.youtube.com/watch?v=${videoId}" 2>/dev/null`,
-        { timeout: 30000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 },
+      execFileSync(
+        ytDlp,
+        [
+          ...subArgs,
+          ...YT_DLP_PERF_FLAGS,
+          "--skip-download",
+          "-o", `${prefix}%(id)s`,
+          "--", `https://www.youtube.com/watch?v=${videoId}`,
+        ],
+        { timeout: 30000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"] },
       );
 
       // Look for the downloaded subtitle file
@@ -235,9 +249,14 @@ function fetchTranscriptWithYtDlpDownload(videoId: string): TranscriptSegment[] 
 // Strategy 2: yt-dlp JSON metadata + subtitle URL fetch (fallback)
 function fetchTranscriptFromYtDlpJson(videoId: string): TranscriptSegment[] {
   const ytDlp = findYtDlp();
-  const result = execSync(
-    `"${ytDlp}" ${YT_DLP_PERF_FLAGS} --skip-download --dump-json -- "https://www.youtube.com/watch?v=${videoId}" 2>/dev/null`,
-    { timeout: 30000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 },
+  const result = execFileSync(
+    ytDlp,
+    [
+      ...YT_DLP_PERF_FLAGS,
+      "--skip-download", "--dump-json",
+      "--", `https://www.youtube.com/watch?v=${videoId}`,
+    ],
+    { timeout: 30000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"] },
   );
 
   const info = JSON.parse(result) as {
@@ -269,11 +288,11 @@ function fetchTranscriptFromYtDlpJson(videoId: string): TranscriptSegment[] {
 
   if (!track?.url) throw new Error("yt-dlp: no subtitle track URL");
 
-  // Use yt-dlp itself to download the subtitle (it handles auth that curl can't)
+  // SECURITY: Use execFileSync to avoid shell injection from track.url
   const prefix = join(tmpdir(), "fasty-sub-");
   const outFile = `${prefix}${videoId}.sub`;
   try {
-    execSync(`curl -sL -- "${track.url}" -o "${outFile}"`, {
+    execFileSync("curl", ["-sL", "--", track.url, "-o", outFile], {
       timeout: 15000,
       encoding: "utf-8",
     });
@@ -356,9 +375,15 @@ function joinSegments(segments: TranscriptSegment[]): string {
   return decodeHtmlEntities(segments.map((s) => s.text).join(" ")).trim();
 }
 
+// Sanitize title for safe markdown heading insertion
+function sanitizeMarkdownTitle(title: string): string {
+  return title.replace(/[<#\[\]()\\`*_{}!|~>]/g, "\\$&").replace(/\n/g, " ");
+}
+
 // Format transcript as Markdown
 export function formatTranscriptAsMarkdown(transcript: string, videoId: string, title: string): string {
-  return `# ${title}
+  const safeTitle = sanitizeMarkdownTitle(title);
+  return `# ${safeTitle}
 
 **URL:** https://youtube.com/watch?v=${videoId}
 

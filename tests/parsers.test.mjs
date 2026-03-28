@@ -1,78 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import {
+  extractVideoId,
+  decodeHtmlEntities,
+  parseTranscriptXml,
+  extractJsonObject,
+} from "../lib/cli-utils.mjs";
 
-// ── Inline copies of pure functions from src/utils.ts ──────────────────────
-// These are pure string-manipulation functions duplicated here so we can test
-// without compiling TypeScript.  Keep in sync with src/utils.ts.
-
-function extractVideoId(url) {
-  const patterns = [
-    /(?:https?:\/\/)?(?:www\.)?youtu\.be\/([a-zA-Z0-9_-]+)/,
-    /(?:https?:\/\/)?(?:www\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/,
-    /(?:https?:\/\/)?(?:www\.)?youtube\.com\/embed\/([a-zA-Z0-9_-]+)/,
-    /(?:https?:\/\/)?(?:www\.)?youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/,
-    /^([a-zA-Z0-9_-]{11})$/,
-  ];
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match && match[1]) return match[1];
-  }
-  return null;
-}
-
-function decodeHtmlEntities(text) {
-  return text
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num)))
-    .replace(/\s+/g, " ");
-}
-
-function parseTranscriptXml(xml) {
-  const srv1Re = /<text[^>]*>([^<]*)<\/text>/g;
-  const srv1Segments = [];
-  let m;
-  while ((m = srv1Re.exec(xml)) !== null) {
-    if (m[1].trim()) srv1Segments.push(m[1]);
-  }
-  if (srv1Segments.length > 0) return srv1Segments;
-
-  const pRe = /<p[^>]*>([\s\S]*?)<\/p>/g;
-  const srv3Segments = [];
-  while ((m = pRe.exec(xml)) !== null) {
-    const inner = m[1];
-    const words = [];
-    const sRe = /<s[^>]*>([^<]*)<\/s>/g;
-    let s;
-    while ((s = sRe.exec(inner)) !== null) {
-      if (s[1]) words.push(s[1]);
-    }
-    if (words.length > 0) {
-      srv3Segments.push(words.join(""));
-    } else {
-      const stripped = inner.replace(/<[^>]+>/g, "").trim();
-      if (stripped) srv3Segments.push(stripped);
-    }
-  }
-  return srv3Segments;
-}
-
-function extractJsonObject(str, startIdx) {
-  if (str[startIdx] !== "{") return null;
-  let depth = 0;
-  for (let i = startIdx; i < str.length; i++) {
-    if (str[i] === "{") depth++;
-    else if (str[i] === "}") depth--;
-    if (depth === 0) return str.substring(startIdx, i + 1);
-  }
-  return null;
-}
-
-// ── Tests ──────────────────────────────────────────────────────────────────
+// ── Tests (importing real implementations from lib/cli-utils.mjs) ─────────
 
 describe("extractVideoId", () => {
   it("parses standard watch URL", () => {
@@ -174,25 +109,42 @@ describe("decodeHtmlEntities", () => {
       "it's <b>bold</b> & \"quoted\"",
     );
   });
+
+  it("does not double-decode &amp;lt; into <", () => {
+    assert.equal(decodeHtmlEntities("&amp;lt;"), "&lt;");
+  });
+
+  it("does not double-decode &amp;amp; into &", () => {
+    assert.equal(decodeHtmlEntities("&amp;amp;"), "&amp;");
+  });
 });
 
 describe("parseTranscriptXml – srv1 format", () => {
-  it("parses standard srv1 XML", () => {
+  it("parses standard srv1 XML with start/duration", () => {
     const xml = `<transcript><text start="0" dur="5">Hello world</text><text start="5" dur="3">Second line</text></transcript>`;
     const result = parseTranscriptXml(xml);
-    assert.deepEqual(result, ["Hello world", "Second line"]);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].text, "Hello world");
+    assert.equal(result[0].start, 0);
+    assert.equal(result[0].duration, 5);
+    assert.equal(result[1].text, "Second line");
+    assert.equal(result[1].start, 5);
+    assert.equal(result[1].duration, 3);
   });
 
   it("skips empty segments", () => {
     const xml = `<transcript><text start="0" dur="5">Hello</text><text start="5" dur="3">   </text><text start="8" dur="2">World</text></transcript>`;
     const result = parseTranscriptXml(xml);
-    assert.deepEqual(result, ["Hello", "World"]);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].text, "Hello");
+    assert.equal(result[1].text, "World");
   });
 
-  it("handles entities in srv1 content", () => {
+  it("handles entities in srv1 content (raw, not decoded)", () => {
     const xml = `<transcript><text start="0" dur="5">it&#39;s &amp; good</text></transcript>`;
     const result = parseTranscriptXml(xml);
-    assert.deepEqual(result, ["it&#39;s &amp; good"]);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].text, "it&#39;s &amp; good");
   });
 });
 
@@ -200,19 +152,27 @@ describe("parseTranscriptXml – srv3 format", () => {
   it("parses srv3 XML with <s> tags", () => {
     const xml = `<timedtext><body><p t="0" d="5000"><s>Hello </s><s>world</s></p><p t="5000" d="3000"><s>Second</s></p></body></timedtext>`;
     const result = parseTranscriptXml(xml);
-    assert.deepEqual(result, ["Hello world", "Second"]);
+    assert.equal(result.length, 2);
+    assert.equal(result[0].text, "Hello world");
+    assert.equal(result[0].start, 0);
+    assert.equal(result[0].duration, 5);
+    assert.equal(result[1].text, "Second");
+    assert.equal(result[1].start, 5);
+    assert.equal(result[1].duration, 3);
   });
 
   it("falls back to stripped text when no <s> tags", () => {
     const xml = `<timedtext><body><p t="0" d="5000">Plain text here</p></body></timedtext>`;
     const result = parseTranscriptXml(xml);
-    assert.deepEqual(result, ["Plain text here"]);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].text, "Plain text here");
   });
 
   it("handles multiple <s> tags per <p>", () => {
     const xml = `<timedtext><body><p t="0" d="5000"><s>one </s><s>two </s><s>three</s></p></body></timedtext>`;
     const result = parseTranscriptXml(xml);
-    assert.deepEqual(result, ["one two three"]);
+    assert.equal(result.length, 1);
+    assert.equal(result[0].text, "one two three");
   });
 });
 
@@ -258,5 +218,20 @@ describe("extractJsonObject", () => {
     const str = 'prefix {"x": 1} suffix';
     const idx = str.indexOf("{");
     assert.equal(extractJsonObject(str, idx), '{"x": 1}');
+  });
+
+  it("handles braces inside JSON string values", () => {
+    const str = '{"key": "value with { and } inside"}';
+    assert.equal(extractJsonObject(str, 0), str);
+  });
+
+  it("handles escaped quotes inside strings", () => {
+    const str = '{"key": "value with \\"quotes\\" and {braces}"}';
+    assert.equal(extractJsonObject(str, 0), str);
+  });
+
+  it("handles complex nested JSON with string braces", () => {
+    const str = '{"a": {"desc": "use {curly} braces"}, "b": 2}';
+    assert.equal(extractJsonObject(str, 0), str);
   });
 });

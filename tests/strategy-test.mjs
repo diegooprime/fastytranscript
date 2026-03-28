@@ -6,9 +6,13 @@
  * Usage: node tests/strategy-test.mjs
  */
 
+import { execFileSync } from "node:child_process";
+import { parseTranscriptXml, extractJsonObject } from "../lib/cli-utils.mjs";
+
 const WEB_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const ANDROID_UA = "com.google.android.youtube/19.09.37 (Linux; U; Android 12; en_US) gzip";
+const FETCH_TIMEOUT = 15000;
 
 const TEST_VIDEOS = [
   { id: "dQw4w9WgXcQ", desc: "Popular video (Rick Astley - Never Gonna Give You Up)" },
@@ -17,52 +21,15 @@ const TEST_VIDEOS = [
   { id: "kJQP7kiw5Fk", desc: "Despacito (most viewed music video)" },
 ];
 
-// ── Parsing helpers (mirrored from src/utils.ts) ────────────────────────────
-
-function parseTranscriptXml(xml) {
-  const srv1Re = /<text[^>]*>([^<]*)<\/text>/g;
-  const srv1Segments = [];
-  let m;
-  while ((m = srv1Re.exec(xml)) !== null) {
-    if (m[1].trim()) srv1Segments.push(m[1]);
-  }
-  if (srv1Segments.length > 0) return srv1Segments;
-
-  const pRe = /<p[^>]*>([\s\S]*?)<\/p>/g;
-  const srv3Segments = [];
-  while ((m = pRe.exec(xml)) !== null) {
-    const inner = m[1];
-    const words = [];
-    const sRe = /<s[^>]*>([^<]*)<\/s>/g;
-    let s;
-    while ((s = sRe.exec(inner)) !== null) {
-      if (s[1]) words.push(s[1]);
-    }
-    if (words.length > 0) {
-      srv3Segments.push(words.join(""));
-    } else {
-      const stripped = inner.replace(/<[^>]+>/g, "").trim();
-      if (stripped) srv3Segments.push(stripped);
-    }
-  }
-  return srv3Segments;
-}
-
-function extractJsonObject(str, startIdx) {
-  if (str[startIdx] !== "{") return null;
-  let depth = 0;
-  for (let i = startIdx; i < str.length; i++) {
-    if (str[i] === "{") depth++;
-    else if (str[i] === "}") depth--;
-    if (depth === 0) return str.substring(startIdx, i + 1);
-  }
-  return null;
+function fetchWithTimeout(url, opts = {}) {
+  const timeoutMs = opts.timeout || FETCH_TIMEOUT;
+  return fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs) });
 }
 
 // ── Strategy implementations ────────────────────────────────────────────────
 
 async function strategyAndroid(videoId) {
-  const res = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
+  const res = await fetchWithTimeout("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": ANDROID_UA },
     body: JSON.stringify({
@@ -90,7 +57,7 @@ async function strategyAndroid(videoId) {
   const en = tracks.find((t) => t.languageCode === "en" || t.languageCode.startsWith("en"));
   const trackUrl = (en || tracks[0]).baseUrl;
 
-  const capRes = await fetch(trackUrl, { headers: { "User-Agent": ANDROID_UA } });
+  const capRes = await fetchWithTimeout(trackUrl, { headers: { "User-Agent": ANDROID_UA } });
   if (!capRes.ok) throw new Error(`Caption fetch HTTP ${capRes.status}`);
   const xml = await capRes.text();
   const segments = parseTranscriptXml(xml);
@@ -99,8 +66,9 @@ async function strategyAndroid(videoId) {
 }
 
 async function strategyPageScrape(videoId) {
-  const res = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+  const res = await fetchWithTimeout(`https://www.youtube.com/watch?v=${videoId}`, {
     headers: { "User-Agent": WEB_UA, "Accept-Language": "en-US,en;q=0.9" },
+    timeout: 30000,
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
@@ -121,7 +89,7 @@ async function strategyPageScrape(videoId) {
   const en = tracks.find((t) => t.languageCode === "en" || t.languageCode.startsWith("en"));
   const trackUrl = (en || tracks[0]).baseUrl;
 
-  const capRes = await fetch(trackUrl, { headers: { "User-Agent": WEB_UA } });
+  const capRes = await fetchWithTimeout(trackUrl, { headers: { "User-Agent": WEB_UA } });
   if (!capRes.ok) throw new Error(`Caption fetch HTTP ${capRes.status}`);
   const xml = await capRes.text();
   const segments = parseTranscriptXml(xml);
@@ -130,18 +98,17 @@ async function strategyPageScrape(videoId) {
 }
 
 async function strategyYtDlp(videoId) {
-  const { execSync } = await import("node:child_process");
-
   // Check if yt-dlp is available
   try {
-    execSync("which yt-dlp", { encoding: "utf-8" });
+    execFileSync("yt-dlp", ["--version"], { timeout: 5000, stdio: "pipe" });
   } catch {
     throw new Error("yt-dlp not installed");
   }
 
-  const result = execSync(
-    `yt-dlp --skip-download --dump-json "https://www.youtube.com/watch?v=${videoId}" 2>/dev/null`,
-    { timeout: 45000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 },
+  const result = execFileSync(
+    "yt-dlp",
+    ["--skip-download", "--dump-json", "--", `https://www.youtube.com/watch?v=${videoId}`],
+    { timeout: 45000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"] },
   );
 
   const info = JSON.parse(result);
@@ -162,7 +129,7 @@ async function strategyYtDlp(videoId) {
 
   if (!track?.url) throw new Error("No subtitle track URL");
 
-  const subResp = execSync(`curl -sL "${track.url}"`, {
+  const subResp = execFileSync("curl", ["-sL", "--", track.url], {
     timeout: 15000,
     encoding: "utf-8",
     maxBuffer: 10 * 1024 * 1024,
@@ -214,19 +181,19 @@ async function runTest(strategy, video) {
 async function main() {
   console.log("YouTube Transcript Strategy Test");
   console.log("=".repeat(80));
-  console.log(`Testing ${TEST_VIDEOS.length} videos × ${strategies.length} strategies\n`);
+  console.log(`Testing ${TEST_VIDEOS.length} videos x ${strategies.length} strategies\n`);
 
   const results = [];
 
   for (const video of TEST_VIDEOS) {
-    console.log(`\n▶ ${video.desc} (${video.id})`);
+    console.log(`\n> ${video.desc} (${video.id})`);
     console.log("-".repeat(60));
 
     for (const strategy of strategies) {
       const result = await runTest(strategy, video);
       results.push({ video: video.id, strategy: strategy.name, ...result });
 
-      const status = result.ok ? "✓" : "✗";
+      const status = result.ok ? "OK" : "FAIL";
       const detail = result.ok
         ? `${result.segments} segments in ${result.ms}ms`
         : `FAILED (${result.ms}ms): ${result.error}`;
@@ -269,7 +236,7 @@ async function main() {
     return rows.every((r) => !r.ok);
   });
   if (allFailed) {
-    console.log("\n⚠  At least one strategy failed on ALL videos!");
+    console.log("\n  At least one strategy failed on ALL videos!");
     process.exit(1);
   }
 }
