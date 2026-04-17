@@ -1,11 +1,4 @@
 #!/usr/bin/env node
-/**
- * Multi-strategy stress test for YouTube transcript fetching.
- * Tests each strategy independently against a diverse set of videos.
- *
- * Usage: node tests/strategy-test.mjs
- */
-
 import { execFileSync } from "node:child_process";
 import { parseTranscriptXml, extractJsonObject } from "../lib/cli-utils.mjs";
 
@@ -26,28 +19,29 @@ function fetchWithTimeout(url, opts = {}) {
   return fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs) });
 }
 
-// ── Strategy implementations ────────────────────────────────────────────────
-
 async function strategyAndroid(videoId) {
-  const res = await fetchWithTimeout("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "User-Agent": ANDROID_UA },
-    body: JSON.stringify({
-      context: {
-        client: {
-          clientName: "ANDROID",
-          clientVersion: "19.09.37",
-          androidSdkVersion: 31,
-          hl: "en",
-          gl: "US",
-          userAgent: ANDROID_UA,
+  const res = await fetchWithTimeout(
+    "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": ANDROID_UA },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: "ANDROID",
+            clientVersion: "19.09.37",
+            androidSdkVersion: 31,
+            hl: "en",
+            gl: "US",
+            userAgent: ANDROID_UA,
+          },
         },
-      },
-      videoId,
-      contentCheckOk: true,
-      racyCheckOk: true,
-    }),
-  });
+        videoId,
+        contentCheckOk: true,
+        racyCheckOk: true,
+      }),
+    },
+  );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const data = await res.json();
@@ -98,7 +92,6 @@ async function strategyPageScrape(videoId) {
 }
 
 async function strategyYtDlp(videoId) {
-  // Check if yt-dlp is available
   try {
     execFileSync("yt-dlp", ["--version"], { timeout: 5000, stdio: "pipe" });
   } catch {
@@ -108,7 +101,12 @@ async function strategyYtDlp(videoId) {
   const result = execFileSync(
     "yt-dlp",
     ["--skip-download", "--dump-json", "--", `https://www.youtube.com/watch?v=${videoId}`],
-    { timeout: 45000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"] },
+    {
+      timeout: 45000,
+      encoding: "utf-8",
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ["pipe", "pipe", "ignore"],
+    },
   );
 
   const info = JSON.parse(result);
@@ -116,8 +114,12 @@ async function strategyYtDlp(videoId) {
   const autoCaps = info.automatic_captions || {};
 
   const subSource =
-    subs["en"] || subs["en-US"] || Object.values(subs)[0] ||
-    autoCaps["en"] || autoCaps["en-US"] || Object.values(autoCaps)[0];
+    subs["en"] ||
+    subs["en-US"] ||
+    Object.values(subs)[0] ||
+    autoCaps["en"] ||
+    autoCaps["en-US"] ||
+    Object.values(autoCaps)[0];
 
   if (!subSource || subSource.length === 0) throw new Error("No subtitle sources");
 
@@ -138,17 +140,21 @@ async function strategyYtDlp(videoId) {
   const segments = parseTranscriptXml(subResp);
   if (segments.length > 0) return segments;
 
-  // VTT fallback
   if (subResp.includes("WEBVTT")) {
     const lines = subResp.split("\n");
     const textLines = [];
     for (const line of lines) {
       const trimmed = line.trim();
       if (
-        !trimmed || trimmed === "WEBVTT" ||
-        trimmed.startsWith("Kind:") || trimmed.startsWith("Language:") ||
-        trimmed.startsWith("NOTE") || /^\d+$/.test(trimmed) || /-->/.test(trimmed)
-      ) continue;
+        !trimmed ||
+        trimmed === "WEBVTT" ||
+        trimmed.startsWith("Kind:") ||
+        trimmed.startsWith("Language:") ||
+        trimmed.startsWith("NOTE") ||
+        /^\d+$/.test(trimmed) ||
+        /-->/.test(trimmed)
+      )
+        continue;
       const cleaned = trimmed.replace(/<[^>]+>/g, "").trim();
       if (cleaned && !textLines.includes(cleaned)) textLines.push(cleaned);
     }
@@ -157,8 +163,6 @@ async function strategyYtDlp(videoId) {
 
   throw new Error("Could not parse subtitle content");
 }
-
-// ── Runner ──────────────────────────────────────────────────────────────────
 
 const strategies = [
   { name: "ANDROID InnerTube", fn: strategyAndroid },
@@ -201,12 +205,12 @@ async function main() {
     }
   }
 
-  // Summary table
   console.log("\n\n" + "=".repeat(80));
   console.log("SUMMARY");
   console.log("=".repeat(80));
 
-  const header = "Strategy".padEnd(22) + "Pass".padStart(6) + "Fail".padStart(6) + "Avg ms".padStart(10);
+  const header =
+    "Strategy".padEnd(22) + "Pass".padStart(6) + "Fail".padStart(6) + "Avg ms".padStart(10);
   console.log(header);
   console.log("-".repeat(header.length));
 
@@ -214,14 +218,15 @@ async function main() {
     const rows = results.filter((r) => r.strategy === strategy.name);
     const pass = rows.filter((r) => r.ok).length;
     const fail = rows.filter((r) => !r.ok).length;
-    const avgMs = rows.length > 0
-      ? (rows.reduce((sum, r) => sum + parseInt(r.ms), 0) / rows.length).toFixed(0)
-      : "-";
+    const avgMs =
+      rows.length > 0
+        ? (rows.reduce((sum, r) => sum + parseInt(r.ms), 0) / rows.length).toFixed(0)
+        : "-";
     console.log(
       strategy.name.padEnd(22) +
-      String(pass).padStart(6) +
-      String(fail).padStart(6) +
-      String(avgMs).padStart(10),
+        String(pass).padStart(6) +
+        String(fail).padStart(6) +
+        String(avgMs).padStart(10),
     );
   }
 
@@ -230,7 +235,6 @@ async function main() {
   console.log("-".repeat(header.length));
   console.log(`Total: ${totalPass}/${totalTests} passed`);
 
-  // Exit with failure if any strategy had zero successes
   const allFailed = strategies.some((s) => {
     const rows = results.filter((r) => r.strategy === s.name);
     return rows.every((r) => !r.ok);

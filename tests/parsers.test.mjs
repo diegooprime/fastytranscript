@@ -5,37 +5,24 @@ import {
   decodeHtmlEntities,
   parseTranscriptXml,
   extractJsonObject,
+  sanitizeMarkdownTitle,
 } from "../lib/cli-utils.mjs";
-
-// ── Tests (importing real implementations from lib/cli-utils.mjs) ─────────
 
 describe("extractVideoId", () => {
   it("parses standard watch URL", () => {
-    assert.equal(
-      extractVideoId("https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
-      "dQw4w9WgXcQ",
-    );
+    assert.equal(extractVideoId("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ");
   });
 
   it("parses short youtu.be URL", () => {
-    assert.equal(
-      extractVideoId("https://youtu.be/dQw4w9WgXcQ"),
-      "dQw4w9WgXcQ",
-    );
+    assert.equal(extractVideoId("https://youtu.be/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
   });
 
   it("parses embed URL", () => {
-    assert.equal(
-      extractVideoId("https://www.youtube.com/embed/dQw4w9WgXcQ"),
-      "dQw4w9WgXcQ",
-    );
+    assert.equal(extractVideoId("https://www.youtube.com/embed/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
   });
 
   it("parses shorts URL", () => {
-    assert.equal(
-      extractVideoId("https://www.youtube.com/shorts/dQw4w9WgXcQ"),
-      "dQw4w9WgXcQ",
-    );
+    assert.equal(extractVideoId("https://www.youtube.com/shorts/dQw4w9WgXcQ"), "dQw4w9WgXcQ");
   });
 
   it("accepts bare 11-char video ID", () => {
@@ -43,17 +30,11 @@ describe("extractVideoId", () => {
   });
 
   it("handles URL without https://", () => {
-    assert.equal(
-      extractVideoId("www.youtube.com/watch?v=dQw4w9WgXcQ"),
-      "dQw4w9WgXcQ",
-    );
+    assert.equal(extractVideoId("www.youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ");
   });
 
   it("handles URL without www.", () => {
-    assert.equal(
-      extractVideoId("https://youtube.com/watch?v=dQw4w9WgXcQ"),
-      "dQw4w9WgXcQ",
-    );
+    assert.equal(extractVideoId("https://youtube.com/watch?v=dQw4w9WgXcQ"), "dQw4w9WgXcQ");
   });
 
   it("handles IDs with hyphens and underscores", () => {
@@ -106,7 +87,7 @@ describe("decodeHtmlEntities", () => {
   it("handles mixed entities", () => {
     assert.equal(
       decodeHtmlEntities("it&#39;s &lt;b&gt;bold&lt;/b&gt; &amp; &quot;quoted&quot;"),
-      "it's <b>bold</b> & \"quoted\"",
+      'it\'s <b>bold</b> & "quoted"',
     );
   });
 
@@ -116,6 +97,12 @@ describe("decodeHtmlEntities", () => {
 
   it("does not double-decode &amp;amp; into &", () => {
     assert.equal(decodeHtmlEntities("&amp;amp;"), "&amp;");
+  });
+});
+
+describe("sanitizeMarkdownTitle", () => {
+  it("escapes markdown-sensitive characters and normalizes newlines", () => {
+    assert.equal(sanitizeMarkdownTitle("Hello <world>\nline_two"), "Hello \\<world\\> line\\_two");
   });
 });
 

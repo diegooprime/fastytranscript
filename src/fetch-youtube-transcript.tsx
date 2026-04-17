@@ -1,6 +1,16 @@
-import { Detail, Clipboard, showToast, Toast, getPreferenceValues } from "@raycast/api";
+import {
+  Detail,
+  Clipboard,
+  showToast,
+  Toast,
+  getPreferenceValues,
+} from "@raycast/api";
 import { useEffect, useState } from "react";
-import { extractVideoId, getVideoTranscript, formatTranscriptAsMarkdown } from "./utils";
+import {
+  extractVideoId,
+  getVideoTranscript,
+  formatTranscriptAsMarkdown,
+} from "./utils";
 
 export default function Command() {
   const [markdown, setMarkdown] = useState<string>("");
@@ -9,67 +19,44 @@ export default function Command() {
   useEffect(() => {
     async function fetchTranscript() {
       try {
-        // Read from clipboard
-        let videoUrl: string | null = null;
-        try {
-          const clipboardText = await Clipboard.readText();
-          if (clipboardText && extractVideoId(clipboardText)) {
-            videoUrl = clipboardText;
-          }
-        } catch {
-          // Clipboard read failed
-        }
+        const clipboardText = await Clipboard.readText();
+        const videoId = clipboardText ? extractVideoId(clipboardText) : null;
 
-        if (!videoUrl) {
-          setMarkdown("# ❌ No YouTube URL Found\n\nCopy a YouTube URL to your clipboard, then try again.");
-          setIsLoading(false);
-          return;
-        }
-
-        const videoId = extractVideoId(videoUrl);
         if (!videoId) {
-          setMarkdown(`# ❌ Invalid URL\n\nNot a valid YouTube link.\n\n**URL:** ${videoUrl}`);
-          setIsLoading(false);
-          return;
-        }
-
-        // Fetch transcript
-        const prefs = getPreferenceValues<{ includeTimestamps: boolean }>();
-        let result;
-        try {
-          result = await getVideoTranscript(videoId, { timestamps: prefs.includeTimestamps });
-        } catch (fetchError) {
-          const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
           setMarkdown(
-            `# ❌ Error\n\n${msg}\n\n**Video ID:** ${videoId}\n**URL:** https://youtube.com/watch?v=${videoId}`,
+            "# ❌ No YouTube URL Found\n\nCopy a YouTube URL to your clipboard, then try again.",
           );
-          setIsLoading(false);
           return;
         }
 
-        const { transcript, title } = result;
+        const prefs = getPreferenceValues<{ includeTimestamps: boolean }>();
+        const { transcript, title } = await getVideoTranscript(videoId, {
+          timestamps: prefs.includeTimestamps,
+        });
 
-        // Format as Markdown
-        const markdownContent = formatTranscriptAsMarkdown(transcript, videoId, title);
+        const markdownContent = formatTranscriptAsMarkdown(
+          transcript,
+          videoId,
+          title,
+        );
 
-        // Copy to clipboard
         await Clipboard.copy(markdownContent);
+        setMarkdown(markdownContent);
 
-        await showToast({
+        void showToast({
           style: Toast.Style.Success,
           title: "Copied to clipboard!",
         });
-
-        setMarkdown(markdownContent);
-        setIsLoading(false);
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
         setMarkdown(`# ❌ Error\n\n${errorMessage}`);
+      } finally {
         setIsLoading(false);
       }
     }
 
-    fetchTranscript();
+    void fetchTranscript();
   }, []);
 
   return <Detail isLoading={isLoading} markdown={isLoading ? "" : markdown} />;

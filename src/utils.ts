@@ -2,19 +2,38 @@ import { execFileSync } from "child_process";
 import { existsSync, readFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-
-const WEB_UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+import type {
+  TranscriptOptions,
+  TranscriptResult,
+  TranscriptSegment,
+  YouTubeOEmbedResponse,
+  YtDlpInfo,
+} from "./types";
 
 // Common paths where yt-dlp may be installed (Raycast doesn't inherit full shell PATH)
-const YT_DLP_PATHS = ["/opt/homebrew/bin/yt-dlp", "/usr/local/bin/yt-dlp", "/usr/bin/yt-dlp", "yt-dlp"];
+const YT_DLP_PATHS = [
+  "/opt/homebrew/bin/yt-dlp",
+  "/usr/local/bin/yt-dlp",
+  "/usr/bin/yt-dlp",
+  "yt-dlp",
+];
 
 const FETCH_TIMEOUT = 15000;
 
 // Perf flags for yt-dlp: skip JS challenge solving and format checks (not needed for subtitle-only downloads)
-const YT_DLP_PERF_FLAGS = ["--no-warnings", "--no-check-formats", "--extractor-args", "youtube:player_skip=js"];
+const YT_DLP_PERF_FLAGS = [
+  "--no-warnings",
+  "--no-check-formats",
+  "--extractor-args",
+  "youtube:player_skip=js",
+];
 
-async function fetchWithTimeout(url: string, opts: RequestInit & { timeout?: number } = {}): Promise<Response> {
+const SUBTITLE_FILE_EXTENSIONS = [".en.srv1", ".en.vtt"];
+
+async function fetchWithTimeout(
+  url: string,
+  opts: RequestInit & { timeout?: number } = {},
+): Promise<Response> {
   const timeoutMs = opts.timeout || FETCH_TIMEOUT;
   return fetch(url, { ...opts, signal: AbortSignal.timeout(timeoutMs) });
 }
@@ -42,11 +61,11 @@ async function fetchVideoTitle(videoId: string): Promise<string> {
       `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
     );
     if (response.ok) {
-      const data = (await response.json()) as { title?: string };
+      const data = (await response.json()) as YouTubeOEmbedResponse;
       return data.title || `YouTube Video ${videoId}`;
     }
   } catch {
-    // Fallback
+    return `YouTube Video ${videoId}`;
   }
   return `YouTube Video ${videoId}`;
 }
@@ -67,7 +86,8 @@ function decodeHtmlEntities(text: string): string {
 // Parse transcript XML - handles both srv1 (<text>) and srv3 (<p>/<s>) formats
 function parseTranscriptXml(xml: string): TranscriptSegment[] {
   // srv1 format: <text start="..." dur="...">content</text>
-  const srv1Re = /<text\s+start="([^"]*)"(?:\s+dur="([^"]*)")?[^>]*>([^<]*)<\/text>/g;
+  const srv1Re =
+    /<text\s+start="([^"]*)"(?:\s+dur="([^"]*)")?[^>]*>([^<]*)<\/text>/g;
   const srv1Segments: TranscriptSegment[] = [];
   let m: RegExpExecArray | null;
   while ((m = srv1Re.exec(xml)) !== null) {
@@ -125,9 +145,15 @@ function parseVtt(vtt: string): TranscriptSegment[] {
     const timeLine = lines[i].match(timeRe);
     if (timeLine) {
       currentStart =
-        parseInt(timeLine[1]) * 3600 + parseInt(timeLine[2]) * 60 + parseInt(timeLine[3]) + parseInt(timeLine[4]) / 1000;
+        parseInt(timeLine[1]) * 3600 +
+        parseInt(timeLine[2]) * 60 +
+        parseInt(timeLine[3]) +
+        parseInt(timeLine[4]) / 1000;
       currentEnd =
-        parseInt(timeLine[5]) * 3600 + parseInt(timeLine[6]) * 60 + parseInt(timeLine[7]) + parseInt(timeLine[8]) / 1000;
+        parseInt(timeLine[5]) * 3600 +
+        parseInt(timeLine[6]) * 60 +
+        parseInt(timeLine[7]) +
+        parseInt(timeLine[8]) / 1000;
       // Collect text lines until empty line
       const textLines: string[] = [];
       for (let j = i + 1; j < lines.length; j++) {
@@ -139,16 +165,16 @@ function parseVtt(vtt: string): TranscriptSegment[] {
       }
       const text = textLines.join(" ");
       if (text && !segments.some((s) => s.text === text)) {
-        segments.push({ text, start: currentStart, duration: currentEnd - currentStart });
+        segments.push({
+          text,
+          start: currentStart,
+          duration: currentEnd - currentStart,
+        });
       }
     }
   }
   return segments;
 }
-
-export type TranscriptSegment = { text: string; start: number; duration: number };
-
-type TranscriptOptions = { timestamps?: boolean };
 
 // Find the yt-dlp binary (Raycast doesn't inherit full shell PATH)
 function findYtDlp(): string {
@@ -163,36 +189,31 @@ function findYtDlp(): string {
   throw new Error("yt-dlp not found. Install via: brew install yt-dlp");
 }
 
+function removeFileIfExists(path: string): void {
+  if (existsSync(path)) unlinkSync(path);
+}
+
 // Clean up temp subtitle files for a video
 function cleanupSubFiles(prefix: string, videoId: string): void {
-  const patterns = [".en.srv1", ".en.vtt", ".en.json3", ".en.srv3"];
-  for (const ext of patterns) {
-    const path = `${prefix}${videoId}${ext}`;
-    try {
-      if (existsSync(path)) unlinkSync(path);
-    } catch {
-      // Ignore cleanup errors
-    }
+  for (const ext of SUBTITLE_FILE_EXTENSIONS) {
+    removeFileIfExists(`${prefix}${videoId}${ext}`);
   }
 }
 
 // Strategy 1: yt-dlp direct subtitle download (most reliable)
 // Downloads subtitles directly instead of fetching timedtext URLs (which YouTube broke)
-function fetchTranscriptWithYtDlpDownload(videoId: string): TranscriptSegment[] {
+function fetchTranscriptWithYtDlpDownload(
+  videoId: string,
+): TranscriptSegment[] {
   const ytDlp = findYtDlp();
   const prefix = join(tmpdir(), "fasty-");
 
-  // Clean up any previous files
   cleanupSubFiles(prefix, videoId);
 
   // SECURITY: videoId is validated by extractVideoId (alphanumeric + hyphen/underscore only)
-  // Try manual subs first, then auto-generated
   const subArgSets: string[][] = [
-    // Attempt 1: manual subs in srv1 format
     ["--write-sub", "--sub-lang", "en", "--sub-format", "srv1"],
-    // Attempt 2: auto-generated subs in srv1 format
     ["--write-auto-sub", "--sub-lang", "en", "--sub-format", "srv1"],
-    // Attempt 3: auto-generated subs in vtt format (broader compatibility)
     ["--write-auto-sub", "--sub-lang", "en", "--sub-format", "vtt"],
   ];
 
@@ -204,44 +225,44 @@ function fetchTranscriptWithYtDlpDownload(videoId: string): TranscriptSegment[] 
           ...subArgs,
           ...YT_DLP_PERF_FLAGS,
           "--skip-download",
-          "-o", `${prefix}%(id)s`,
-          "--", `https://www.youtube.com/watch?v=${videoId}`,
+          "-o",
+          `${prefix}%(id)s`,
+          "--",
+          `https://www.youtube.com/watch?v=${videoId}`,
         ],
-        { timeout: 30000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"] },
+        {
+          timeout: 30000,
+          encoding: "utf-8",
+          maxBuffer: 10 * 1024 * 1024,
+          stdio: ["pipe", "pipe", "ignore"],
+        },
       );
 
-      // Look for the downloaded subtitle file
-      const possibleFiles = [
-        `${prefix}${videoId}.en.srv1`,
-        `${prefix}${videoId}.en.vtt`,
-        `${prefix}${videoId}.en.json3`,
-        `${prefix}${videoId}.en.srv3`,
-      ];
+      const possibleFiles = SUBTITLE_FILE_EXTENSIONS.map(
+        (ext) => `${prefix}${videoId}${ext}`,
+      );
 
       for (const filePath of possibleFiles) {
         if (existsSync(filePath)) {
           const content = readFileSync(filePath, "utf-8");
-          unlinkSync(filePath); // Clean up immediately
+          unlinkSync(filePath);
 
           if (!content || content.trim().length === 0) continue;
 
-          // Parse based on format
           if (filePath.endsWith(".vtt")) {
             const segments = parseVtt(content);
             if (segments.length > 0) return segments;
           } else {
-            // Try XML parsing (srv1, srv3)
             const segments = parseTranscriptXml(content);
             if (segments.length > 0) return segments;
           }
         }
       }
     } catch {
-      // This attempt failed, try next
+      cleanupSubFiles(prefix, videoId);
     }
   }
 
-  // Final cleanup
   cleanupSubFiles(prefix, videoId);
   throw new Error("yt-dlp: could not download subtitles");
 }
@@ -253,16 +274,20 @@ function fetchTranscriptFromYtDlpJson(videoId: string): TranscriptSegment[] {
     ytDlp,
     [
       ...YT_DLP_PERF_FLAGS,
-      "--skip-download", "--dump-json",
-      "--", `https://www.youtube.com/watch?v=${videoId}`,
+      "--skip-download",
+      "--dump-json",
+      "--",
+      `https://www.youtube.com/watch?v=${videoId}`,
     ],
-    { timeout: 30000, encoding: "utf-8", maxBuffer: 10 * 1024 * 1024, stdio: ["pipe", "pipe", "ignore"] },
+    {
+      timeout: 30000,
+      encoding: "utf-8",
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ["pipe", "pipe", "ignore"],
+    },
   );
 
-  const info = JSON.parse(result) as {
-    subtitles?: Record<string, Array<{ url: string; ext: string }>>;
-    automatic_captions?: Record<string, Array<{ url: string; ext: string }>>;
-  };
+  const info = JSON.parse(result) as YtDlpInfo;
 
   const subs = info.subtitles || {};
   const autoCaps = info.automatic_captions || {};
@@ -312,34 +337,34 @@ function fetchTranscriptFromYtDlpJson(videoId: string): TranscriptSegment[] {
       }
     }
   } catch {
-    // Clean up on error
-    try {
-      if (existsSync(outFile)) unlinkSync(outFile);
-    } catch {
-      // Ignore
-    }
+    removeFileIfExists(outFile);
   }
 
   throw new Error("yt-dlp: subtitle URL returned empty or unparseable content");
 }
 
 // Format seconds into MM:SS
-export function formatTimestamp(seconds: number): string {
+function formatTimestamp(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
 // Join segments with timestamps: "[MM:SS] text\n"
-export function joinSegmentsWithTimestamps(segments: TranscriptSegment[]): string {
-  return segments.map((s) => `[${formatTimestamp(s.start)}] ${decodeHtmlEntities(s.text).trim()}`).join("\n");
+function joinSegmentsWithTimestamps(segments: TranscriptSegment[]): string {
+  return segments
+    .map(
+      (s) =>
+        `[${formatTimestamp(s.start)}] ${decodeHtmlEntities(s.text).trim()}`,
+    )
+    .join("\n");
 }
 
 // Main: try all strategies in order
 export async function getVideoTranscript(
   videoId: string,
   options: TranscriptOptions = {},
-): Promise<{ transcript: string; title: string }> {
+): Promise<TranscriptResult> {
   const titlePromise = fetchVideoTitle(videoId);
   const errors: string[] = [];
 
@@ -349,7 +374,9 @@ export async function getVideoTranscript(
     const title = await titlePromise;
     return { transcript: formatSegments(segments, options), title };
   } catch (e) {
-    errors.push(`yt-dlp download: ${e instanceof Error ? e.message : String(e)}`);
+    errors.push(
+      `yt-dlp download: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
   // Strategy 2: yt-dlp JSON metadata + URL fetch (fallback)
@@ -361,10 +388,15 @@ export async function getVideoTranscript(
     errors.push(`yt-dlp JSON: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  throw new Error(`No transcript available. All methods failed:\n${errors.map((e) => `- ${e}`).join("\n")}`);
+  throw new Error(
+    `No transcript available. All methods failed:\n${errors.map((e) => `- ${e}`).join("\n")}`,
+  );
 }
 
-function formatSegments(segments: TranscriptSegment[], options: TranscriptOptions): string {
+function formatSegments(
+  segments: TranscriptSegment[],
+  options: TranscriptOptions,
+): string {
   if (options.timestamps) {
     return joinSegmentsWithTimestamps(segments);
   }
@@ -377,11 +409,15 @@ function joinSegments(segments: TranscriptSegment[]): string {
 
 // Sanitize title for safe markdown heading insertion
 function sanitizeMarkdownTitle(title: string): string {
-  return title.replace(/[<#\[\]()\\`*_{}!|~>]/g, "\\$&").replace(/\n/g, " ");
+  return title.replace(/[<#[\]()\\`*_{}!|~>]/g, "\\$&").replace(/\n/g, " ");
 }
 
 // Format transcript as Markdown
-export function formatTranscriptAsMarkdown(transcript: string, videoId: string, title: string): string {
+export function formatTranscriptAsMarkdown(
+  transcript: string,
+  videoId: string,
+  title: string,
+): string {
   const safeTitle = sanitizeMarkdownTitle(title);
   return `# ${safeTitle}
 

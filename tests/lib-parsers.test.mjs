@@ -1,46 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import {
-  decodeHtmlEntities,
-  vttToPlainText,
-  sanitizeFilename,
-  formatTranscriptMarkdown,
-} from "../lib/parsers.mjs";
-
-// ── lib/parsers.mjs — full coverage ─────────────────────────────────────────
-
-describe("lib/parsers decodeHtmlEntities", () => {
-  it("decodes &amp; to &", () => {
-    assert.equal(decodeHtmlEntities("a &amp; b"), "a & b");
-  });
-
-  it("decodes &lt; and &gt;", () => {
-    assert.equal(decodeHtmlEntities("&lt;div&gt;"), "<div>");
-  });
-
-  it("decodes &#39; to apostrophe", () => {
-    assert.equal(decodeHtmlEntities("it&#39;s"), "it's");
-  });
-
-  it("decodes &quot; to double quote", () => {
-    assert.equal(decodeHtmlEntities("&quot;hi&quot;"), '"hi"');
-  });
-
-  it("handles text with no entities", () => {
-    assert.equal(decodeHtmlEntities("plain text"), "plain text");
-  });
-
-  it("handles empty string", () => {
-    assert.equal(decodeHtmlEntities(""), "");
-  });
-
-  it("handles all entities combined", () => {
-    assert.equal(
-      decodeHtmlEntities("&#39;&quot;&amp;&lt;&gt;"),
-      "'\"&<>",
-    );
-  });
-});
+import { vttToPlainText, sanitizeFilename, formatTranscriptMarkdown } from "../lib/parsers.mjs";
 
 describe("lib/parsers vttToPlainText", () => {
   it("strips WEBVTT header", () => {
@@ -54,7 +14,8 @@ describe("lib/parsers vttToPlainText", () => {
   });
 
   it("strips timestamp lines (-->)", () => {
-    const vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nHello world\n\n00:00:05.000 --> 00:00:10.000\nSecond line";
+    const vtt =
+      "WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nHello world\n\n00:00:05.000 --> 00:00:10.000\nSecond line";
     assert.equal(vttToPlainText(vtt), "Hello world Second line");
   });
 
@@ -125,6 +86,11 @@ describe("lib/parsers formatTranscriptMarkdown", () => {
     assert.ok(result.includes("# My Video"));
     assert.ok(result.includes("https://youtube.com/watch?v=abc123"));
     assert.ok(result.includes("transcript text"));
+  });
+
+  it("escapes markdown-sensitive title characters", () => {
+    const result = formatTranscriptMarkdown("My <Video>\nseries", "vid1", "text");
+    assert.ok(result.startsWith("# My \\<Video\\> series"));
   });
 
   it("includes URL line", () => {

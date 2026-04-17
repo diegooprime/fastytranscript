@@ -22,8 +22,6 @@ function run(args, opts = {}) {
   }
 }
 
-// ── CLI Integration Tests ──────────────────────────────────────────────────
-
 describe("CLI argument handling", () => {
   it("exits 2 with usage message when no arguments given", () => {
     const result = run("");
@@ -43,7 +41,6 @@ describe("CLI argument handling", () => {
   });
 
   it("correctly parses --timestamps flag without erroring on flag parsing", () => {
-    // Should not treat --timestamps as a positional arg
     const result = run("--timestamps");
     assert.equal(result.exitCode, 2, "Should fail with exit 2 (no positional arg)");
     assert.ok(result.stderr.includes("Usage:"));
@@ -57,8 +54,6 @@ describe("CLI argument handling", () => {
 
 describe("CLI extractVideoId integration", () => {
   it("accepts a bare 11-char video ID", () => {
-    // This will try to fetch the transcript (may fail with exit 1 if network unavailable)
-    // but should NOT exit 2 (invalid input)
     const result = run("dQw4w9WgXcQ --json", { timeout: 30000 });
     assert.notEqual(result.exitCode, 2, "Should not be invalid input");
   });
@@ -85,7 +80,6 @@ describe("CLI output format", () => {
       assert.ok(typeof parsed.segmentCount === "number", "JSON should contain segmentCount");
       assert.ok(Array.isArray(parsed.segments), "JSON should contain segments array");
     }
-    // If exit 1 (no captions), that is acceptable for this test
   });
 
   it("outputs markdown by default (if transcript available)", () => {
@@ -100,7 +94,6 @@ describe("CLI output format", () => {
   it("includes timestamps when --timestamps flag is used (if transcript available)", () => {
     const result = run("dQw4w9WgXcQ --timestamps", { timeout: 30000 });
     if (result.exitCode === 0) {
-      // Timestamps look like [00:00] or [01:23]
       assert.ok(/\[\d{2}:\d{2}\]/.test(result.stdout), "Should contain timestamp markers");
     }
   });
