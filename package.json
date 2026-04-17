@@ -21,7 +21,7 @@
       "name": "fetch-youtube-transcript",
       "title": "FastyTranscript",
       "description": "Fetch YouTube transcript from clipboard",
-      "mode": "view",
+      "mode": "no-view",
       "icon": "extension_icon.png"
     }
   ],

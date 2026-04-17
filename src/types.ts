@@ -6,6 +6,7 @@ export type TranscriptSegment = {
 
 export type TranscriptOptions = {
   timestamps?: boolean;
+  includeTitle?: boolean;
 };
 
 export type TranscriptResult = {

@@ -1,63 +1,42 @@
 import {
-  Detail,
   Clipboard,
+  closeMainWindow,
+  getPreferenceValues,
+  showHUD,
   showToast,
   Toast,
-  getPreferenceValues,
 } from "@raycast/api";
-import { useEffect, useState } from "react";
-import {
-  extractVideoId,
-  getVideoTranscript,
-  formatTranscriptAsMarkdown,
-} from "./utils";
+import { extractVideoId, getVideoTranscript } from "./utils";
 
-export default function Command() {
-  const [markdown, setMarkdown] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(true);
+export default async function Command() {
+  try {
+    await closeMainWindow({ clearRootSearch: true });
 
-  useEffect(() => {
-    async function fetchTranscript() {
-      try {
-        const clipboardText = await Clipboard.readText();
-        const videoId = clipboardText ? extractVideoId(clipboardText) : null;
+    const clipboardText = await Clipboard.readText();
+    const videoId = clipboardText ? extractVideoId(clipboardText) : null;
 
-        if (!videoId) {
-          setMarkdown(
-            "# ❌ No YouTube URL Found\n\nCopy a YouTube URL to your clipboard, then try again.",
-          );
-          return;
-        }
-
-        const prefs = getPreferenceValues<{ includeTimestamps: boolean }>();
-        const { transcript, title } = await getVideoTranscript(videoId, {
-          timestamps: prefs.includeTimestamps,
-        });
-
-        const markdownContent = formatTranscriptAsMarkdown(
-          transcript,
-          videoId,
-          title,
-        );
-
-        await Clipboard.copy(markdownContent);
-        setMarkdown(markdownContent);
-
-        void showToast({
-          style: Toast.Style.Success,
-          title: "Copied to clipboard!",
-        });
-      } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        setMarkdown(`# ❌ Error\n\n${errorMessage}`);
-      } finally {
-        setIsLoading(false);
-      }
+    if (!videoId) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "No YouTube URL in clipboard",
+      });
+      return;
     }
 
-    void fetchTranscript();
-  }, []);
+    const prefs = getPreferenceValues<{ includeTimestamps: boolean }>();
+    const { transcript } = await getVideoTranscript(videoId, {
+      timestamps: prefs.includeTimestamps,
+      includeTitle: false,
+    });
 
-  return <Detail isLoading={isLoading} markdown={isLoading ? "" : markdown} />;
+    await Clipboard.copy(transcript);
+    await showHUD("Transcript copied");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await showToast({
+      style: Toast.Style.Failure,
+      title: "Transcript failed",
+      message,
+    });
+  }
 }
